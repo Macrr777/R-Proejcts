@@ -1,0 +1,53 @@
+---
+title: "Logistic Regression in R"
+author: "Amir"
+date: '2022-06-23'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(plotly)
+library(dplyr)
+library(knitr)
+```
+
+```{r}
+diabetes <- read.csv("C:/Users/choud/Desktop/Titanic Machine learning from Disater/diabetes.csv",stringsAsFactors = F,header = T)
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+str(diabetes)
+```
+```{r}
+set.seed(100)
+train <- sample(dim(diabetes)[1],dim(diabetes)[1]*0.9)
+diabetes_train <- diabetes[train,]
+diabetes_test <- diabetes[-train,]
+model <- glm(Outcome~.,data=diabetes_train,family = binomial(link='logit'))
+summary(model)
+```
+```{r}
+predictions <- predict(model,newdata=diabetes_test,type="response")
+predictions <- round(predictions)
+mean(predictions==diabetes_test$Outcome)
+```
+```{r}
+threshold <- seq(from=0.1,to=0.9,by=0.01)
+j <- 1
+accuracy <-c()
+for(i in threshold){
+  predictions <- predict(model,newdata=diabetes_test,type = 'response')
+  predictions <- ifelse(predictions>i,1,0)
+  accuracy[j] <- mean(predictions==diabetes_test$Outcome)
+  j=j+1
+  
+}
+model_accuracy <- data.frame(threshold,accuracy)
+(ggplot(model_accuracy,aes(x=threshold,y = accuracy))+geom_line()+geom_point()+ggtitle("Threshold vs Accuracy"))
+```
+```{r}
+kable(model_accuracy %>% arrange(desc(accuracy)))
+```
+

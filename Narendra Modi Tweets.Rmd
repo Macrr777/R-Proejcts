@@ -1,0 +1,250 @@
+---
+title: "Twitter data Fetch"
+author: "Narendra Modi"
+date: '2022-06-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+packages = c(
+  'rtweet',
+  'httpuv',
+  'tidyverse',
+  'rtweet',
+  'tidytext',
+  'ggwordcloud',
+  'reshape2',
+  'wordcloud',
+  'igraph',
+  'ggraph',
+  'topicmodels',
+  'tm'
+)
+
+package.check <- lapply( #by vikram
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+    }
+  }
+)
+```
+
+```{r}
+library('rtweet')
+library('httpuv')
+
+api_key <- "8GwQcGEWxLAbcHvJBbdlqu7Xf"
+api_secret_key <- "tzsZNg9rvDNqrCA3Btc4Gka9iv6W9NkSxo2WfSwsGZIHm8Rnk3"
+app_name <- "CenterScrape"
+access_token <- "635181580-sD7F6vWdH7gt8kPHh4i90HolDX4aWZNhFZ8Y9DV7"
+access_token_secret<-"ZmtuRto1MYnSuUwkPeANh8MVkFcjCtA4YMv0MNooZUhvE"
+
+token <- create_token(
+  app = app_name,
+  consumer_key = api_key,
+  consumer_secret = api_secret_key,
+  access_token = access_token,
+  access_secret = access_token_secret
+)
+get_token()
+```
+
+
+```{r}
+library('tidyverse')
+library('rtweet')
+timelineDF <- get_timelines('narendramodi')
+```
+
+```{r}
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x)
+
+tweets <- timelineDF %>%
+  filter(is_retweet == FALSE) %>%
+  select(text) %>%
+  cbind(tweet_id = 100:1) %>%
+  rename(tweet = text) %>%
+  mutate(tweet = removeURL(tweet))
+```
+
+```{r}
+library('tidytext')
+tokenized_tweets <- unnest_tokens(tweets, input = 'tweet', output = 'word')
+head(tokenized_tweets)
+tokenized_tweets %>%
+  count(word, sort = TRUE) %>%
+  rename(count = n) %>%
+  filter(count > 5) %>%
+  mutate(word = reorder(word, count)) %>%
+  ggplot(aes(x = count, y = word)) + 
+    geom_col()  + 
+    labs(title = "Count of Words Tweets") + 
+    scale_x_continuous(breaks = seq(0, 50, 5))
+```
+
+
+```{r}
+tokenized_tweets %>%
+  anti_join(stop_words) %>% #finds where tweet words overlap with predefined stop words, and removes them
+  count(word, sort = TRUE) %>%
+  rename(count = n) %>%
+  filter(count > 5) %>%
+  mutate(word = reorder(word, count)) %>%
+  ggplot(aes(x = count, y = word)) + 
+    geom_col() + 
+    labs(title = "Count of Words Tweets") + 
+    scale_x_continuous(breaks = seq(0, 50, 5))
+```
+```{r}
+get_sentiments("afinn")
+get_sentiments("bing")
+get_sentiments("nrc")
+tokenized_tweets %>%
+  group_by(tweet_id) %>%
+  inner_join(get_sentiments("afinn")) %>%
+  summarise(mean_sentiment = mean(value)) %>%
+  ggplot(aes(x = tweet_id, y = mean_sentiment)) + 
+    geom_col() + 
+    labs(title = 'Mean Sentiment by Tweet - Afinn Lexicon', x = "Tweet ID", y = 'Mean Sentiment') +
+scale_x_continuous(breaks = seq(1, 51)) +
+    scale_y_continuous(breaks = seq(-1, 3, 0.5))
+```
+
+```{r}
+library('ggwordcloud')
+
+tokenized_tweets %>%
+  anti_join(stop_words) %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 4) %>%
+  ggplot(aes(label = word, size = n, color = n)) + 
+    geom_text_wordcloud() + 
+    scale_size_area(max_size = 15)
+```
+```{r}
+library('reshape2')
+library('wordcloud')
+
+tokenized_tweets %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>% #cast into matrix, grouped by neg and pos
+  comparison.cloud(colors = c("red", "green"),
+                   max.words = 20)
+```
+```{r}
+tokenized_tweets %>%
+  count(word, sort = TRUE) %>%
+  rename(count = n) %>%
+  mutate(total=sum(count))%>%
+  mutate(tf=count/total) %>%
+  head()
+
+
+#OR - tidyverse
+
+tokenized_tweets %>%
+  count(word,tweet_id, sort = TRUE)%>%
+  rename(count = n)%>%
+  bind_tf_idf(word,tweet_id,count)
+
+tweet_tf_idf <- tokenized_tweets %>%
+  count(word, tweet_id, sort = TRUE) %>%
+  rename(count = n) %>%
+  bind_tf_idf(word, tweet_id, count)
+
+head(tweet_tf_idf)
+
+tweet_tf_idf %>%
+  select(word, tweet_id, tf_idf, count) %>%
+  group_by(tweet_id) %>%
+  slice_max(order_by = count, n = 6, with_ties=FALSE) %>% #takes top 5 words from each tweet
+  filter(tweet_id < 6) %>% #just look at 5 tweets
+  ggplot(aes(label = word)) + 
+    geom_text_wordcloud() + 
+    facet_grid(rows = vars(tweet_id))
+```
+```{r}
+tweets %>%
+  unnest_tokens(bigram, tweet, token = "ngrams", n = 2 )
+
+#Remove Stop Words
+
+tweets_bigram <- tweets %>%
+  unnest_tokens(bigram, tweet, token = 'ngrams', n = 2) 
+
+head(tweets_bigram)
+tweets_bigram <- tweets_bigram %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%#separates on whitespace
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+  
+  #bigram count
+  tweets_bigram %>%
+  count(word1,word2, sort = TRUE)
+tweets %>%
+unnest_tokens(bigram, tweet, token = 'ngrams', n =2 )%>%
+  count(tweet_id,bigram)%>%
+  bind_tf_idf(bigram , tweet_id,n)%>%
+  group_by(tweet_id)%>%
+  arrange(tweet_id,desc(tf_idf))
+
+```
+```{r}
+library('igraph')
+library('ggraph')
+bigram_counts <- tweets_bigram %>%
+  count(word1, word2, sort = TRUE)
+head(bigram_counts)
+bi_graph <- bigram_counts %>%
+  filter(n > 2) %>% 
+  graph_from_data_frame()
+
+ggraph(bi_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+
+```{r}
+library('topicmodels')
+library('tm')
+
+#parameters
+num_topics=3
+top_n_to_get=10
+
+tweets_lda <- tweet_tf_idf %>%
+  anti_join(stop_words) %>%
+  cast_dtm(document = tweet_id, term =  word, value =  count) %>%
+  LDA(k=num_topics)
+
+tweets_lda
+tweet_topics <- tidy(tweets_lda) #beta is per-topic-per-word probabilities
+  
+head(tweet_topics)
+
+tweet_topics_top_terms <- tweet_topics %>%
+  group_by(topic) %>%
+  top_n(top_n_to_get, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+head(tweet_topics_top_terms)
+
+tweet_topics_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+
+```
+
